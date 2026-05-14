@@ -1,4 +1,5 @@
 .env
 chroma_db/
+Course_PDFs/
 __pycache__/
 *.pyc
