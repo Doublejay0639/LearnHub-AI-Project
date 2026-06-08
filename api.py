@@ -8,6 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pathlib import Path
 import shutil
+from lime.lime_text import LimeTextExplainer
+from query import ask
+import numpy as np
 
 from typing import Optional #new
 from query import ask, generate_assessment
@@ -197,3 +200,64 @@ async def debug_meta():
     metadatas = all_data.get("metadatas", [])
     # Return the last 20 chunks' metadata so we can see what keys are stored
     return {"sample": metadatas[-20:]}
+
+
+@app.post("/explain")
+async def explain(req: AskRequest):
+    if not req.question or not req.question.strip():
+        raise HTTPException(status_code=400, detail="question cannot be empty.")
+
+    # Step 1 — get the course chunks first (reuse your existing ask logic)
+    result = ask(question=req.question, course=req.course, module=req.module)
+
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    # Step 2 — extract the answer text to use as reference
+    original_answer = result["answer"]
+
+    # Step 3 — define a classifier that measures how much each sentence
+    # in the context contributes to producing a similar answer
+    explainer = LimeTextExplainer(class_names=["irrelevant", "relevant"])
+
+    STOPWORDS = {"the", "a", "an", "is", "it", "in", "of", "and", "or", "to", "that", "this", "for", "with", "as", "are", "be", "was", "were", "by", "at", "on", "can"}
+
+    def classifier_fn(texts):
+        scores = []
+        for text in texts:
+            original_words = set(original_answer.lower().split()) - STOPWORDS
+            perturbed_words = set(text.lower().split()) - STOPWORDS
+            overlap = len(original_words & perturbed_words) / max(len(original_words), 1)
+            scores.append([1 - overlap, overlap])
+        return np.array(scores)
+
+    # Step 4 — use the answer itself as the text to explain
+    try:
+        exp = explainer.explain_instance(
+            original_answer,
+            classifier_fn,
+            num_features=6,
+            num_samples=100,
+        )
+
+        top_sentences = [
+            {"sentence": word, "importance": round(float(score), 4)}
+            for word, score in exp.as_list()
+            if score > 0  # only return positively contributing terms
+        ]
+
+        # sort by importance descending
+        top_sentences = sorted(top_sentences, key=lambda x: x["importance"], reverse=True)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LIME explanation failed: {str(e)}")
+
+    return {
+        "question": req.question,
+        "answer": original_answer,
+        "course_references": result.get("course_references", []),
+        "explanation": {
+            "description": "Words and phrases that most contributed to this answer",
+            "top_features": top_sentences
+        }
+    }

@@ -1,0 +1,37 @@
+{
+  "faithfulness": 0.88,
+  "answer_relevancy": 0.92,
+  "context_precision": 0.8,
+  "per_question": [
+    {
+      "question": "What are the two types of user interface?",
+      "faithfulness": 0.8,
+      "answer_relevancy": 0.9,
+      "context_precision": 0.8
+    },
+    {
+      "question": "What is HCI?",
+      "faithfulness": 0.9,
+      "answer_relevancy": 0.9,
+      "context_precision": 0.8
+    },
+    {
+      "question": "What is usability?",
+      "faithfulness": 0.9,
+      "answer_relevancy": 0.9,
+      "context_precision": 0.8
+    },
+    {
+      "question": "What are the golden rules of interface design?",
+      "faithfulness": 0.9,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.8
+    },
+    {
+      "question": "What is GOMS?",
+      "faithfulness": 0.9,
+      "answer_relevancy": 0.9,
+      "context_precision": 0.8
+    }
+  ]
+}

@@ -67,8 +67,26 @@ def ask(question: str, course: str = None, module: str = None) -> dict:
                       f"course={raw_metadatas[i].get('course')}  "
                       f"file={raw_metadatas[i].get('file_name')}")
 
+            # valid_chunks = [
+            #     {"text": raw_docs[i], "meta": raw_metadatas[i]}
+            #     for i in range(len(raw_docs))
+            #     if raw_docs[i] and raw_docs[i].strip()
+            # ]
+
+            # if valid_chunks:
+            #     had_course_match = True
+            #     course_context = "\n\n---\n\n".join(
+            #         c["text"] for c in valid_chunks[:15]
+            #     )
+            #     seen_files = []
+            #     for c in valid_chunks:
+            #         fname = c["meta"].get("file_name", "Unknown file")
+            #         if fname and fname not in seen_files:
+            #             seen_files.append(fname)
+            #     course_references = seen_files
+
             valid_chunks = [
-                {"text": raw_docs[i], "meta": raw_metadatas[i]}
+                {"text": raw_docs[i], "meta": raw_metadatas[i], "distance": raw_distances[i]}
                 for i in range(len(raw_docs))
                 if raw_docs[i] and raw_docs[i].strip()
             ]
@@ -78,12 +96,19 @@ def ask(question: str, course: str = None, module: str = None) -> dict:
                 course_context = "\n\n---\n\n".join(
                     c["text"] for c in valid_chunks[:15]
                 )
-                seen_files = []
+
+                # Build course_references with relevance scores
+                seen_files = {}
                 for c in valid_chunks:
                     fname = c["meta"].get("file_name", "Unknown file")
-                    if fname and fname not in seen_files:
-                        seen_files.append(fname)
-                course_references = seen_files
+                    relevance = round(1 - c["distance"], 4)  # convert distance → similarity
+                    if fname not in seen_files:
+                        seen_files[fname] = relevance  # first occurrence = highest score
+
+                course_references = [
+                    {"file": fname, "relevance": score}
+                    for fname, score in seen_files.items()
+                ]
 
         except Exception as e:
             print(f"[ask] ChromaDB error: {e}")
