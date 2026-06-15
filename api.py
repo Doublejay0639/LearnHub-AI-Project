@@ -3,19 +3,17 @@ import os
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from pathlib import Path
-import shutil
 from lime.lime_text import LimeTextExplainer
 from query import ask
 import numpy as np
 
-from typing import Optional #new
+from typing import Optional
 from query import ask, generate_assessment
-from ingest import ingest_file, delete_file
-from config import COURSE_PDFS_PATH
+from ingest import ingest_from_url, delete_file
 from config import CHROMA_DB_PATH
 from chromadb.utils import embedding_functions
 
@@ -73,54 +71,55 @@ async def ask_question(req: AskRequest):
 
     return result
 
-# ── Upload a course material ──────────────────────────────────────
-# ── Supported file types ──────────────────────────────────────────
+# ── Upload request model ──────────────────────────────────────────
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".csv"}
+
+class UploadRequest(BaseModel):
+    fileUrl:     str            # Cloudinary secure_url
+    fileName:    str            # original file name e.g. "lecture1.pdf"
+    course_name: str
+    module_name: Optional[str] = None
 
 # ── Upload a course material ──────────────────────────────────────
 @app.post("/upload")
-async def upload_material(
-    file: UploadFile = File(...),
-    course_name: str = Form(...),
-    module_name: str = Form(None)
-):
-    if not course_name or not course_name.strip():
+async def upload_material(req: UploadRequest):
+    if not req.course_name or not req.course_name.strip():
         raise HTTPException(status_code=400, detail="course_name is required.")
 
-    ext = Path(file.filename).suffix.lower()
+    if not req.fileUrl or not req.fileUrl.strip():
+        raise HTTPException(status_code=400, detail="fileUrl is required.")
+
+    if not req.fileName or not req.fileName.strip():
+        raise HTTPException(status_code=400, detail="fileName is required.")
+
+    ext = Path(req.fileName).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type '{ext}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
         )
 
-    # Save file to the course folder
-    save_dir = Path(COURSE_PDFS_PATH) / course_name / (module_name or "")
-    save_dir.mkdir(parents=True, exist_ok=True)
-    save_path = save_dir / file.filename
-
-    with open(save_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    # Ingest into ChromaDB
-    chunks_indexed = ingest_file(
-        file_path=str(save_path),
-        course_name=course_name,
-        module_name=module_name or "",
+    # Download from Cloudinary, parse, chunk, embed, store in ChromaDB
+    chunks_indexed = ingest_from_url(
+        file_url=req.fileUrl,
+        file_name=req.fileName,
+        course_name=req.course_name.strip(),
+        module_name=(req.module_name or "").strip(),
     )
 
     if chunks_indexed == 0:
         raise HTTPException(
             status_code=422,
-            detail="File was received but no text could be extracted from it."
+            detail="File was downloaded but no text could be extracted from it."
         )
 
     return {
         "success":        True,
-        "file_name":      file.filename,
+        "file_name":      req.fileName,
+        "file_url":       req.fileUrl,
         "chunks_indexed": chunks_indexed,
-        "course":         course_name,
-        "module":         module_name or None,
+        "course":         req.course_name.strip(),
+        "module":         req.module_name or None,
     }
     
 

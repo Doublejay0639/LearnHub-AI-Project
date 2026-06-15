@@ -224,6 +224,71 @@ if __name__ == "__main__":
     ingest_all()
 
 
+def ingest_from_url(
+    file_url: str,
+    file_name: str,
+    course_name: str,
+    module_name: str = "",
+) -> int:
+    """
+    Downloads a file from a Cloudinary URL into a temp file,
+    then calls the existing ingest_file() logic.
+    Called by the POST /upload endpoint in api.py.
+    """
+    import tempfile
+    import urllib.request
+
+    ext = os.path.splitext(file_name)[1].lower()
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            tmp_path = tmp.name
+
+        # Download the file from Cloudinary
+        urllib.request.urlretrieve(file_url, tmp_path)
+        print(f"  [ingest_from_url] Downloaded {file_name} to {tmp_path}")
+
+        # Reuse existing ingest logic — pass tmp_path as file_path
+        # but use the real file_name for metadata
+        chunks = extract_file(tmp_path)
+
+        if not chunks:
+            print(f"  [warn] No text extracted from {file_name}")
+            return 0
+
+        # Safe re-ingest — delete existing chunks for this file first
+        try:
+            chroma_collection.delete(where={"file_name": {"$eq": file_name}})
+        except Exception:
+            pass
+
+        ids, documents, metadatas = [], [], []
+        for chunk in chunks:
+            ids.append(str(uuid.uuid4()))
+            documents.append(chunk)
+            metadatas.append({
+                "file_name":   file_name,
+                "file_url":    file_url,       # store Cloudinary URL in metadata
+                "course":      course_name,
+                "module":      module_name or "",
+            })
+
+        chroma_collection.add(ids=ids, documents=documents, metadatas=metadatas)
+        print(f"  ✓ {len(chunks)} chunks indexed from {file_name}")
+        return len(chunks)
+
+    except Exception as e:
+        print(f"  [ingest_from_url error] {file_name}: {e}")
+        return 0
+
+    finally:
+        # Always clean up the temp file
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
 def delete_file(file_name: str) -> dict:
     """
     Removes all ChromaDB chunks associated with a specific file.
