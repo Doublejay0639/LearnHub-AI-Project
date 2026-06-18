@@ -57,19 +57,30 @@ class AssessmentGenerationRequest(BaseModel):
 
 @app.post("/ask")
 async def ask_question(req: AskRequest):
-    if not req.question or not req.question.strip():
-        raise HTTPException(status_code=400, detail="question cannot be empty.")
+    try:
+        if not req.question or not req.question.strip():
+            raise HTTPException(status_code=400, detail="question cannot be empty.")
 
-    result = ask(
-        question=req.question,
-        course=req.course,
-        module=req.module,
-    )
+        print(f"\n[ask] Question: {req.question[:80]}...")
+        print(f"[ask] Course: {req.course or 'N/A'}, Module: {req.module or 'N/A'}")
+        
+        result = ask(
+            question=req.question,
+            course=req.course,
+            module=req.module,
+        )
 
-    if "error" in result:
-        raise HTTPException(status_code=500, detail=result["error"])
+        if "error" in result:
+            print(f"[ask] ERROR: {result['error']}")
+            raise HTTPException(status_code=500, detail=result["error"])
 
-    return result
+        print(f"[ask] ✓ Answer generated")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ask] EXCEPTION: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get answer from AI")
 
 # ── Upload request model ──────────────────────────────────────────
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".csv"}
@@ -77,6 +88,13 @@ SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".csv"}
 class UploadRequest(BaseModel):
     fileUrl:     str            # Cloudinary secure_url
     fileName:    str            # original file name e.g. "lecture1.pdf"
+    course_name: str
+    module_name: Optional[str] = None
+
+# New model for /upload-by-url endpoint (backend sends snake_case)
+class UploadByUrlRequest(BaseModel):
+    file_url:    str
+    file_name:   str
     course_name: str
     module_name: Optional[str] = None
 
@@ -121,6 +139,62 @@ async def upload_material(req: UploadRequest):
         "course":         req.course_name.strip(),
         "module":         req.module_name or None,
     }
+
+
+# ── Alias for /upload (called from backend as /upload-by-url) ──────────────────
+@app.post("/upload-by-url")
+async def upload_material_by_url(req: UploadByUrlRequest):
+    """Handles file URL uploads from backend (snake_case format)"""
+    try:
+        if not req.course_name or not req.course_name.strip():
+            raise HTTPException(status_code=400, detail="course_name is required.")
+
+        if not req.file_url or not req.file_url.strip():
+            raise HTTPException(status_code=400, detail="file_url is required.")
+
+        if not req.file_name or not req.file_name.strip():
+            raise HTTPException(status_code=400, detail="file_name is required.")
+
+        print(f"\n[upload-by-url] Processing: {req.file_name}")
+        print(f"[upload-by-url] Course: {req.course_name}, Module: {req.module_name or 'N/A'}")
+
+        ext = Path(req.file_name).suffix.lower()
+        if ext not in SUPPORTED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type '{ext}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
+            )
+
+        # Download from Cloudinary, parse, chunk, embed, store in ChromaDB
+        print(f"[upload-by-url] Calling ingest_from_url...")
+        chunks_indexed = ingest_from_url(
+            file_url=req.file_url,
+            file_name=req.file_name,
+            course_name=req.course_name.strip(),
+            module_name=(req.module_name or "").strip(),
+        )
+
+        if chunks_indexed == 0:
+            error_msg = "File was downloaded but no text could be extracted from it."
+            print(f"[upload-by-url] ERROR: {error_msg}")
+            raise HTTPException(status_code=422, detail=error_msg)
+
+        print(f"[upload-by-url] ✓ Success: {chunks_indexed} chunks indexed")
+        return {
+            "success":        True,
+            "file_name":      req.file_name,
+            "file_url":       req.file_url,
+            "chunks_indexed": chunks_indexed,
+            "course":         req.course_name.strip(),
+            "module":         req.module_name or None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[upload-by-url] EXCEPTION: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
     
 
 #new
@@ -130,16 +204,28 @@ async def generate_assessment_endpoint(req: AssessmentGenerationRequest):
     Generates MCQ assessment questions scoped to a course or module.
     Returns a draft JSON array for tutor review before saving.
     """
-    result = generate_assessment(
-        course=req.course,
-        module=req.module,
-        num_questions=req.num_questions
-    )
+    try:
+        print(f"\n[generate-assessment] Generating for course: {req.course}")
+        print(f"[generate-assessment] Module: {req.module or 'N/A'}, Questions: {req.num_questions}")
+        
+        result = generate_assessment(
+            course=req.course,
+            module=req.module,
+            num_questions=req.num_questions
+        )
 
-    if "error" in result:
-        status = 404 if "No materials found" in result["error"] or "empty" in result["error"] else 500
-        raise HTTPException(status_code=status, detail=result["error"])
-    return result
+        if "error" in result:
+            print(f"[generate-assessment] ERROR: {result['error']}")
+            status = 404 if "No materials found" in result["error"] or "empty" in result["error"] else 500
+            raise HTTPException(status_code=status, detail=result["error"])
+        
+        print(f"[generate-assessment] ✓ Generated {len(result.get('questions', []))} questions")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[generate-assessment] EXCEPTION: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Delete a course material ──────────────────────────────────────

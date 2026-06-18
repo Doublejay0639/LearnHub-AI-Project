@@ -239,21 +239,39 @@ def ingest_from_url(
     import urllib.request
 
     ext = os.path.splitext(file_name)[1].lower()
+    tmp_path = None
 
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
             tmp_path = tmp.name
 
-        # Download the file from Cloudinary
-        urllib.request.urlretrieve(file_url, tmp_path)
-        print(f"  [ingest_from_url] Downloaded {file_name} to {tmp_path}")
+        # Download the file from Cloudinary with proper headers
+        print(f"  [ingest_from_url] Downloading {file_name} from Cloudinary...")
+        print(f"  [ingest_from_url] URL: {file_url[:80]}...")
+        
+        import ssl
+        req = urllib.request.Request(
+            file_url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
+        
+        # Handle SSL certificate issues
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        with urllib.request.urlopen(req, context=ssl_context, timeout=30) as response:
+            with open(tmp_path, 'wb') as f:
+                f.write(response.read())
+        
+        print(f"  [ingest_from_url] Downloaded {file_name} successfully ({os.path.getsize(tmp_path)} bytes)")
 
         # Reuse existing ingest logic — pass tmp_path as file_path
         # but use the real file_name for metadata
         chunks = extract_file(tmp_path)
 
         if not chunks:
-            print(f"  [warn] No text extracted from {file_name}")
+            print(f"  [ERROR] No text extracted from {file_name} — file may be corrupted or unsupported format")
             return 0
 
         # Safe re-ingest — delete existing chunks for this file first
@@ -277,16 +295,34 @@ def ingest_from_url(
         print(f"  ✓ {len(chunks)} chunks indexed from {file_name}")
         return len(chunks)
 
+    except urllib.error.HTTPError as e:
+        print(f"  [ERROR] HTTP Error {e.code} downloading {file_name}: {e.reason}")
+        if e.code == 401:
+            print(f"  [ERROR] URL unauthorized - Cloudinary URL may be expired or private")
+        elif e.code == 404:
+            print(f"  [ERROR] File not found at URL")
+        print(f"  [ERROR] Full URL: {file_url}")
+        return 0
+    except urllib.error.URLError as e:
+        print(f"  [ERROR] Failed to download {file_name}: {e.reason}")
+        return 0
+    except TimeoutError as e:
+        print(f"  [ERROR] Download timeout for {file_name}: {e}")
+        return 0
     except Exception as e:
-        print(f"  [ingest_from_url error] {file_name}: {e}")
+        print(f"  [ERROR] ingest_from_url failed for {file_name}: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return 0
 
     finally:
         # Always clean up the temp file
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+                print(f"  [ingest_from_url] Cleaned up temp file: {tmp_path}")
+            except Exception as e:
+                print(f"  [warn] Failed to clean temp file {tmp_path}: {e}")
 
 
 def delete_file(file_name: str) -> dict:
