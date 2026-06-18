@@ -3,6 +3,7 @@ import os
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
+import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -13,8 +14,8 @@ import numpy as np
 
 from typing import Optional
 from query import ask, generate_assessment
-from ingest import ingest_from_url, delete_file
-from config import CHROMA_DB_PATH
+from ingest import ingest_all, ingest_from_url, delete_file
+from config import CHROMA_DB_PATH, COURSE_PDFS_PATH
 from chromadb.utils import embedding_functions
 
 chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH) #new
@@ -29,6 +30,8 @@ chroma_collection = chroma_client.get_or_create_collection(
 
 app = FastAPI(title="Course AI Tutor API")
 
+AUTO_INGEST = os.environ.get("AUTO_INGEST", "1").lower() not in {"0", "false", "no"}
+
 # ── Allow your website to call this API ───────────────────────────
 app.add_middleware(
     CORSMiddleware,
@@ -36,6 +39,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup_event():
+    print(f"[startup] CHROMA_DB_PATH={CHROMA_DB_PATH}")
+    print(f"[startup] COURSE_PDFS_PATH={COURSE_PDFS_PATH}")
+    print(f"[startup] AUTO_INGEST={'enabled' if AUTO_INGEST else 'disabled'}")
+    if AUTO_INGEST:
+        try:
+            print("[startup] Ingesting Course_PDFs...")
+            await asyncio.to_thread(ingest_all)
+            print("[startup] AUTO_INGEST complete")
+        except Exception as e:
+            print(f"[startup] AUTO_INGEST failed: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print("[startup] AUTO_INGEST disabled")
 
 # ── Health check ──────────────────────────────────────────────────
 @app.get("/health")
