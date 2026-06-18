@@ -218,6 +218,19 @@ async def upload_material_by_url(req: UploadByUrlRequest):
     
 
 #new
+@app.get("/courses")
+def list_courses():
+    """Return a list of distinct courses currently indexed in ChromaDB."""
+    try:
+        data = chroma_collection.get(include=["metadatas"])
+        metadatas = data.get("metadatas", [])
+        courses = sorted({(m.get("course") or "").strip() for m in metadatas if (m.get("course") or "").strip()})
+        return {"success": True, "courses": courses}
+    except Exception as e:
+        print(f"[courses] ERROR: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list indexed courses")
+
+
 @app.post("/generate-assessment")
 async def generate_assessment_endpoint(req: AssessmentGenerationRequest):
     """
