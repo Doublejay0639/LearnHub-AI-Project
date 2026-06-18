@@ -48,8 +48,18 @@ async def startup_event():
     if AUTO_INGEST:
         try:
             print("[startup] Ingesting Course_PDFs...")
-            await asyncio.to_thread(ingest_all)
-            print("[startup] AUTO_INGEST complete")
+            before = chroma_collection.count()
+            print(f"[startup] ChromaDB count before ingest: {before}")
+            total_indexed = await asyncio.to_thread(ingest_all)
+            after = chroma_collection.count()
+            print(f"[startup] ChromaDB count after ingest: {after}")
+            print(f"[startup] AUTO_INGEST complete. Ingest returned: {total_indexed}")
+            # show a few sample metadata entries if any
+            try:
+                samples = chroma_collection.get(include=["metadatas"]).get("metadatas", [])[:10]
+                print(f"[startup] Sample metadatas ({len(samples)}): {samples}")
+            except Exception as e:
+                print(f"[startup] Failed to read sample metadatas: {e}")
         except Exception as e:
             print(f"[startup] AUTO_INGEST failed: {type(e).__name__}: {e}")
             import traceback

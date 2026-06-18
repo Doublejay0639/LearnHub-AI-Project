@@ -189,9 +189,17 @@ def ingest_all():
               └── Module 1 - Intro/
                     └── lecture.pdf       ← with module subfolders
     """
+    print(f"[ingest_all] COURSE_PDFS_PATH={COURSE_PDFS_PATH}")
     if not os.path.exists(COURSE_PDFS_PATH):
         print(f"[error] Path not found: {COURSE_PDFS_PATH}")
-        return
+        return 0
+
+    # Diagnostic: show top-level listing
+    try:
+        top_entries = sorted(os.listdir(COURSE_PDFS_PATH))
+        print(f"[ingest_all] Top-level entries ({len(top_entries)}): {top_entries}")
+    except Exception as e:
+        print(f"[ingest_all] Failed to list {COURSE_PDFS_PATH}: {e}")
 
     total = 0
     for course_folder in sorted(os.listdir(COURSE_PDFS_PATH)):
@@ -200,6 +208,12 @@ def ingest_all():
             continue
 
         print(f"\nCourse: {course_folder}")
+        # Diagnostic: list course folder contents
+        try:
+            items = sorted(os.listdir(course_path))
+            print(f"  [debug] {course_folder} contains {len(items)} entries: {items}")
+        except Exception as e:
+            print(f"  [debug] Failed to list {course_path}: {e}")
 
         for item in sorted(os.listdir(course_path)):
             item_path = os.path.join(course_path, item)
@@ -215,9 +229,18 @@ def ingest_all():
                 for fname in sorted(os.listdir(item_path)):
                     fpath = os.path.join(item_path, fname)
                     if os.path.isfile(fpath):
+                        # Diagnostic: file size + ext
+                        try:
+                            sz = os.path.getsize(fpath)
+                        except Exception:
+                            sz = -1
+                        print(f"    [file] {fname} (size={sz} bytes)")
                         total += ingest_file(fpath, course_folder, module_name)
 
+    if total == 0:
+        print("\n[warning] Ingestion finished but indexed 0 chunks. Possible causes: empty folders, unsupported file types, or scanned/image-only PDFs without extractable text.")
     print(f"\n✓ Ingestion complete. Total chunks: {total}")
+    return total
 
 
 if __name__ == "__main__":
