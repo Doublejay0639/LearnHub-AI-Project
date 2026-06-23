@@ -2,7 +2,7 @@
 python.github_attestations = false
 
 [build]
-buildCommand = "pip install -r requirements.txt && python download_model.py"
+buildCommand = "pip install -r requirements.txt && HF_HOME=/app/model_cache python download_model.py"
 
 [deploy]
 startCommand = "uvicorn api:app --host 0.0.0.0 --port $PORT"
